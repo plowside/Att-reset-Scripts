@@ -1,0 +1,102 @@
+France
+Spain
+United States
+Italy
+Turkey
+Mexico
+Thailand
+Germany
+United Kingdom
+Japan
+China
+Austria
+Greece
+Portugal
+United Arab Emirates
+Netherlands
+Saudi Arabia
+Croatia
+Switzerland
+Indonesia
+Malaysia
+Vietnam
+Canada
+Poland
+Russia
+Czech Republic
+South Korea
+Morocco
+Egypt
+India
+Australia
+Brazil
+Singapore
+South Africa
+Hungary
+Ireland
+New Zealand
+Sweden
+Denmark
+Belgium
+Norway
+Philippines
+Argentina
+Peru
+Chile
+Finland
+Qatar
+Colombia
+Romania
+Slovenia
+Iceland
+Costa Rica
+Alabama
+Alaska
+Arizona
+Arkansas
+California
+Colorado
+Connecticut
+Delaware
+Florida
+Georgia
+Hawaii
+Idaho
+Illinois
+Indiana
+Iowa
+Kansas
+Kentucky
+Louisiana
+Maine
+Maryland
+Massachusetts
+Michigan
+Minnesota
+Mississippi
+Missouri
+Montana
+Nebraska
+Nevada
+New Hampshire
+New Jersey
+New Mexico
+New York
+North Carolina
+North Dakota
+Ohio
+Oklahoma
+Oregon
+Pennsylvania
+Rhode Island
+South Carolina
+South Dakota
+Tennessee
+Texas
+Utah
+Vermont
+Virginia
+Washington
+West Virginia
+Wisconsin
+Wyoming

@@ -1,0 +1,3 @@
+py encrypt_and_compile_script.py
+pause
+.encrypt_and_compile_script.bat
