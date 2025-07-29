@@ -121,9 +121,9 @@ class AndroidController:
         raise Exception(f"Failed to get valid UI dump after {max_retries} attempts")
 
 
-    def find_element(self, **kwargs) -> Optional[ET.Element]:
+    def find_element(self, fresh=True, **kwargs) -> Optional[ET.Element]:
         """Находит элемент по атрибутам"""
-        root = self.get_ui_dump(True)
+        root = self.get_ui_dump(fresh)
         for node in root.iter('node'):
             match = True
             for attr, value in kwargs.items():
@@ -219,13 +219,31 @@ def setup_magisk_flow(device_id: str):
             text="OK"
         )
         if ok_button is not None:
+            controller.tap_element(ok_button)
             break
+        else:
+            complete_install_text = controller.find_element(
+                resource_id="android:id/message",
+                text="Upgrade to full Magisk to finish the setup. Download and install?",
+                fresh=False
+            )
+            if complete_install_text is not None:
+                print("[*] Magisk wasn\'t fully installed, upgrading...")
+                complete_install_button = controller.find_element(
+                    resource_id="android:id/button1",
+                    text="OK",
+                    fresh=False
+                )
+                controller.tap_element(complete_install_button)
+                time.sleep(6)
+                return False
         time.sleep(1)
 
     if ok_button is None:
         raise Exception("OK button in magisk not found")
 
     return True
+
 
 
 def forgot_password_flow(device_id: str):
@@ -354,13 +372,13 @@ def forgot_password_step(controller: AndroidController, step: str = ''):
     if not step or step == 'user_id_field':
         print("[*] Waiting for User ID field...")
         user_id_field = None
-        for _ in range(20):
+        for _ in range(40):
             user_id_field = controller.find_element(
                 resource_id="userId"
             )
             if user_id_field is not None:
                 break
-            time.sleep(2)
+            time.sleep(1)
 
         if user_id_field is None:
             return False
@@ -371,7 +389,8 @@ def forgot_password_step(controller: AndroidController, step: str = ''):
 
     if not step or step == 'last_name_field':
         last_name_field = controller.find_element(
-            resource_id="lastName"
+            resource_id="lastName",
+            fresh=False
         )
         if last_name_field is None:
             raise Exception("Last name field not found")
@@ -383,7 +402,8 @@ def forgot_password_step(controller: AndroidController, step: str = ''):
         print("[*] Tapping Continue...")
         continue_btn = controller.find_element(
             resource_id="submit",
-            text="Continue"
+            text="Continue",
+            fresh=False
         )
         if continue_btn is None:
             return False
@@ -626,7 +646,7 @@ def root_last_part(device_id, avd_name, retry: int = 0):
         except Exception as e:
             print(f'[-] Error when configuring magisk ({type(e)}): {e}')
 
-    subprocess.run([adb_path, "-s", device_id, "shell", "input", "tap", "900", "1300"])
+    # subprocess.run([adb_path, "-s", device_id, "shell", "input", "tap", "900", "1300"])
 
     print('[*] Waiting for reboot...')
     time_to_check = 20
@@ -682,7 +702,11 @@ def root_last_part(device_id, avd_name, retry: int = 0):
             print('[*] Restarting Frida script...')
             frida_thread = threading.Thread(target=run_frida_script, args=[device_id], daemon=True)
             frida_thread.start()
-            forgot_password_flow(device_id)
+            result = forgot_password_flow(device_id)
+            if result:
+                print('[+] Successfully collected 2 headers (With app restart cuz error)')
+        else:
+            print('[+] Successfully collected 2 headers')
     except Exception as e:
         print(f'[-] Error in forgot_password_flow: {str(e)}')
 
@@ -692,24 +716,35 @@ def cleanup_and_delete(frida_thread, frida_process, device_id, avd_name):
     print('[*] Cleaning up...')
     if frida_thread: frida_thread.join(timeout=2)
     if frida_process: frida_process.terminate()
-    subprocess.run([adb_path, "-s", device_id, "emu", "kill"])
+    if device_id:
+        subprocess.run([adb_path, "-s", device_id, "emu", "kill"])
+    else:
+        subprocess.run(['taskkill', '/F', '/IM', 'emulator*.exe'], shell=True)
     time.sleep(1)
 
     print('[*] Deleting AVD...')
-    subprocess.run([avdmanager_path, "delete", "avd", "-n", avd_name])
+    if avd_name: subprocess.run([avdmanager_path, "delete", "avd", "-n", avd_name])
     print('[+] Device terminated and deleted')
 
 if __name__ == "__main__":
     check_assets_files()
-    try:
-        existing_emulators = get_existing_emulators()
-        print(f'[+] Existing emulators: {existing_emulators or "None"}')
 
-        created_avd_name = create_emulator()
-        print(f'[+] Created AVD: {created_avd_name}')
+    tries_to_do = int(input('How many retries need to do: ').strip())
+    for x in range(0, tries_to_do):
+        created_avd_name = None
+        try:
+            existing_emulators = get_existing_emulators()
+            print(f'[+] Existing emulators: {existing_emulators or "None"}')
 
-        device_id, emulator_process = launch_emulator(created_avd_name, existing_emulators)
+            created_avd_name = create_emulator()
+            print(f'[+] Created AVD: {created_avd_name}')
 
-        root_device(device_id, created_avd_name)
-    except Exception as e:
-        print(f'[-] Error: {str(e)}')
+            device_id, emulator_process = launch_emulator(created_avd_name, existing_emulators)
+
+            try: root_device(device_id, created_avd_name)
+            except Exception as e:
+                cleanup_and_delete(None, None, device_id, created_avd_name)
+                raise e
+        except Exception as e:
+            cleanup_and_delete(None, None, None, created_avd_name)
+            print(f'[-] Error: {str(e)}')
