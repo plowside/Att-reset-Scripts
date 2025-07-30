@@ -8,14 +8,6 @@ from contextlib import contextmanager
 import frida
 import xml.etree.ElementTree as ET
 from typing import Optional, Dict, Tuple
-import random
-import string
-
-def generate_random_string(length):
-    characters = string.ascii_letters + string.digits
-    random_string = ''.join(random.choices(characters, k=length))
-    return random_string
-
 
 # Конфигурация путей
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -55,18 +47,6 @@ def check_assets_files():
 
 
 running_emulators_count = 0
-current_device_name = 'pixel_5'
-devices_cords = {
-    'pixel_5': (1080, 2340),
-    'pixel_6': (1080, 2440),
-    'pixel_6_pro': (1440, 3120),
-}
-prepared_cords = {
-    'pixel_5': {},
-    'pixel_6': {},
-    'pixel_6_pro': {},
-}
-
 
 class AndroidController:
     def __init__(self, device_id: str):
@@ -274,8 +254,6 @@ def forgot_password_flow(device_id: str):
         "cancel_step": False
     }
     shit_skipped = skip_shit_step(controller)
-    if shit_skipped == 0:
-        return 'clear_app_data'
     print(f'[!] Shit skipped: {shit_skipped}')
 
     if shit_skipped == 2:
@@ -407,7 +385,7 @@ def forgot_password_step(controller: AndroidController, step: str = ''):
             # raise Exception("User ID field not found")
 
         print("[*] Entering User ID and Last name...")
-        controller.input_text(user_id_field, f"{generate_random_string(10)}@gmail.com")
+        controller.input_text(user_id_field, "someemail@gmail.com")
 
     if not step or step == 'last_name_field':
         last_name_field = controller.find_element(
@@ -417,7 +395,7 @@ def forgot_password_step(controller: AndroidController, step: str = ''):
         if last_name_field is None:
             raise Exception("Last name field not found")
 
-        controller.input_text(last_name_field, generate_random_string(10))
+        controller.input_text(last_name_field, "email")
         time.sleep(.5)
 
     if not step or step == 'continue_btn':
@@ -449,9 +427,7 @@ def cancel_step(controller: AndroidController, step: str = ''):
 
     if not step or step == 'yes_cancel_button':
         print("[*] Tapping Yes, Cancel...")
-        x, y = rescale_cords(540, 1200, devices_cords['pixel_6'], devices_cords[current_device_name])
-
-        controller.tap(x, y)
+        controller.tap(540, 1200)
 
     return True
 
@@ -483,24 +459,6 @@ def clear_input_buffer():
     while msvcrt.kbhit():
         msvcrt.getch()
 
-def rescale_cords(x, y, original_res, target_res):
-    """
-    Пересчитывает координаты из одного разрешения в другое.
-
-    :param x: Исходная X-координата
-    :param y: Исходная Y-координата
-    :param original_res: Кортеж (ширина, высота) исходного разрешения (например, (1080, 2440))
-    :param target_res: Кортеж (ширина, высота) целевого разрешения (например, (1440, 3120))
-    :return: Новые координаты (new_x, new_y)
-    """
-    original_width, original_height = original_res
-    target_width, target_height = target_res
-
-    new_x = int((x / original_width) * target_width)
-    new_y = int((y / original_height) * target_height)
-
-    return new_x, new_y
-
 def get_existing_emulators():
     """Получаем список всех подключенных эмуляторов до запуска"""
     result = subprocess.run([adb_path, "devices"], capture_output=True, text=True)
@@ -528,7 +486,7 @@ def wait_for_boot_complete(device_id):
 
     raise TimeoutError(f"Эмулятор {device_id} не загрузился в течение {timeout} секунд")
 
-def find_new_emulator(existing_ids, port):
+def find_new_emulator(existing_ids):
     """Находим ID нового эмулятора, которого не было в исходном списке"""
     timeout = 120  # Максимальное время ожидания (секунды)
     start_time = time.time()
@@ -536,9 +494,9 @@ def find_new_emulator(existing_ids, port):
     while time.time() - start_time < timeout:
         result = subprocess.run([adb_path, "devices"], capture_output=True, text=True)
         current_devices = set(line.split('\t')[0] for line in result.stdout.split('\n') if '\tdevice' in line)
-        new_devices = [x for x in list(current_devices) if str(port) in str(x)]
+        new_devices = current_devices - existing_ids
 
-        if len(new_devices) > 0:
+        if new_devices:
             return new_devices.pop()  # Возвращаем первый новый эмулятор
 
         time.sleep(3)
@@ -552,7 +510,7 @@ def create_emulator():
         "create", "avd",
         "-n", avd_name,
         "-k", "system-images;android-32;google_apis;x86_64",
-        "-d", current_device_name
+        "-d", "pixel_6"
     ], shell=True)
     return avd_name
 
@@ -574,7 +532,7 @@ def launch_emulator(avd_name, existing_ids):
     ], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, shell=True)
     time.sleep(10)
 
-    device_id = find_new_emulator(existing_ids, port)
+    device_id = find_new_emulator(existing_ids)
     print(f'[+] Emulator detected with ID: {device_id}')
 
     # Ждем полной загрузки эмулятора
@@ -601,7 +559,7 @@ def install_upload_things(device_id):
     # Выдача разрешений
     package_name = "com.att.myWireless"
     subprocess.run(
-        [adb_path, "-s", device_id, "shell", "pm", "grant", package_name, "android.permission.ACCESS_FINE_LOCATION"],
+        ["adb", "-s", device_id, "shell", "pm", "grant", package_name, "android.permission.ACCESS_FINE_LOCATION"],
         check=True
     )
     print(f"[+] Granted ACCESS_FINE_LOCATION to {package_name}")
@@ -722,8 +680,7 @@ def root_last_part(device_id, avd_name, retry: int = 0):
             return cleanup_and_delete(None, frida_process, device_id, avd_name)
         result = check_magisk_root_screen(controller)
         if result:
-            x, y = rescale_cords(727, 1505, devices_cords['pixel_6'], devices_cords[current_device_name])
-            subprocess.run([adb_path, "-s", device_id, "shell", "input", "tap", str(x), str(y)])
+            subprocess.run([adb_path, "-s", device_id, "shell", "input", "tap", "727", "1505"])
             time.sleep(1)
             if not check_magisk_root_screen(controller):
                 break
