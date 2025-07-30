@@ -8,6 +8,14 @@ from contextlib import contextmanager
 import frida
 import xml.etree.ElementTree as ET
 from typing import Optional, Dict, Tuple
+import random
+import string
+
+def generate_random_string(length):
+    characters = string.ascii_letters + string.digits
+    random_string = ''.join(random.choices(characters, k=length))
+    return random_string
+
 
 # Конфигурация путей
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -47,6 +55,18 @@ def check_assets_files():
 
 
 running_emulators_count = 0
+current_device_name = 'pixel_5'
+devices_cords = {
+    'pixel_5': (1080, 2340),
+    'pixel_6': (1080, 2440),
+    'pixel_6_pro': (1440, 3120),
+}
+prepared_cords = {
+    'pixel_5': {},
+    'pixel_6': {},
+    'pixel_6_pro': {},
+}
+
 
 class AndroidController:
     def __init__(self, device_id: str):
@@ -76,7 +96,7 @@ class AndroidController:
         if not fresh and self.last_dump:
             return self.last_dump
 
-        temp_file = "temp_window.xml"
+        temp_file = f"temp_window-{self.device_id}.xml"
         remote_path = "/sdcard/window_dump.xml"
 
         for attempt in range(max_retries):
@@ -254,6 +274,8 @@ def forgot_password_flow(device_id: str):
         "cancel_step": False
     }
     shit_skipped = skip_shit_step(controller)
+    if shit_skipped == 0:
+        return 'clear_app_data'
     print(f'[!] Shit skipped: {shit_skipped}')
 
     if shit_skipped == 2:
@@ -385,7 +407,7 @@ def forgot_password_step(controller: AndroidController, step: str = ''):
             # raise Exception("User ID field not found")
 
         print("[*] Entering User ID and Last name...")
-        controller.input_text(user_id_field, "someemail@gmail.com")
+        controller.input_text(user_id_field, f"{generate_random_string(10)}@gmail.com")
 
     if not step or step == 'last_name_field':
         last_name_field = controller.find_element(
@@ -395,7 +417,7 @@ def forgot_password_step(controller: AndroidController, step: str = ''):
         if last_name_field is None:
             raise Exception("Last name field not found")
 
-        controller.input_text(last_name_field, "email")
+        controller.input_text(last_name_field, generate_random_string(10))
         time.sleep(.5)
 
     if not step or step == 'continue_btn':
@@ -427,7 +449,9 @@ def cancel_step(controller: AndroidController, step: str = ''):
 
     if not step or step == 'yes_cancel_button':
         print("[*] Tapping Yes, Cancel...")
-        controller.tap(540, 1200)
+        x, y = rescale_cords(540, 1200, devices_cords['pixel_6'], devices_cords[current_device_name])
+
+        controller.tap(x, y)
 
     return True
 
@@ -459,10 +483,30 @@ def clear_input_buffer():
     while msvcrt.kbhit():
         msvcrt.getch()
 
+def rescale_cords(x, y, original_res, target_res):
+    """
+    Пересчитывает координаты из одного разрешения в другое.
+
+    :param x: Исходная X-координата
+    :param y: Исходная Y-координата
+    :param original_res: Кортеж (ширина, высота) исходного разрешения (например, (1080, 2440))
+    :param target_res: Кортеж (ширина, высота) целевого разрешения (например, (1440, 3120))
+    :return: Новые координаты (new_x, new_y)
+    """
+    original_width, original_height = original_res
+    target_width, target_height = target_res
+
+    new_x = int((x / original_width) * target_width)
+    new_y = int((y / original_height) * target_height)
+
+    return new_x, new_y
+
 def get_existing_emulators():
     """Получаем список всех подключенных эмуляторов до запуска"""
     result = subprocess.run([adb_path, "devices"], capture_output=True, text=True)
-    return set(line.split('\t')[0] for line in result.stdout.split('\n') if '\tdevice' in line)
+    emulators = set(line.split('\t')[0] for line in result.stdout.split('\n') if '\tdevice' in line)
+    return emulators
+
 
 def wait_for_boot_complete(device_id):
     """Ожидаем полной загрузки эмулятора через проверку sys.boot_completed"""
@@ -486,7 +530,7 @@ def wait_for_boot_complete(device_id):
 
     raise TimeoutError(f"Эмулятор {device_id} не загрузился в течение {timeout} секунд")
 
-def find_new_emulator(existing_ids):
+def find_new_emulator(existing_ids, port):
     """Находим ID нового эмулятора, которого не было в исходном списке"""
     timeout = 120  # Максимальное время ожидания (секунды)
     start_time = time.time()
@@ -494,9 +538,9 @@ def find_new_emulator(existing_ids):
     while time.time() - start_time < timeout:
         result = subprocess.run([adb_path, "devices"], capture_output=True, text=True)
         current_devices = set(line.split('\t')[0] for line in result.stdout.split('\n') if '\tdevice' in line)
-        new_devices = current_devices - existing_ids
+        new_devices = [x for x in list(current_devices) if str(port) in str(x)]
 
-        if new_devices:
+        if len(new_devices) > 0:
             return new_devices.pop()  # Возвращаем первый новый эмулятор
 
         time.sleep(3)
@@ -510,15 +554,30 @@ def create_emulator():
         "create", "avd",
         "-n", avd_name,
         "-k", "system-images;android-32;google_apis;x86_64",
-        "-d", "pixel_6"
+        "-d", current_device_name
     ], shell=True)
     return avd_name
 
+def create_running_emulators():
+    get_running_emulators()
+    open('running', 'w', encoding='utf-8').write(str(running_emulators_count+1))
+    return
+
+def get_running_emulators():
+    try:
+        if os.path.exists('running'): running = int(open('running', 'r', encoding='utf-8').read())
+        else: running = 0
+    except:
+        running = 0
+    print('running', type(running), running)
+    global running_emulators_count
+    running_emulators_count = running
+
 def launch_emulator(avd_name, existing_ids):
     global running_emulators_count
+    print('running_emulators_count', running_emulators_count)
 
     port = 5580 + 2 * running_emulators_count
-    running_emulators_count += 1
 
     print(f'[*] Launching emulator: {avd_name} on port {port}')
     emulator_process = subprocess.Popen([
@@ -532,7 +591,7 @@ def launch_emulator(avd_name, existing_ids):
     ], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, shell=True)
     time.sleep(10)
 
-    device_id = find_new_emulator(existing_ids)
+    device_id = find_new_emulator(existing_ids, port)
     print(f'[+] Emulator detected with ID: {device_id}')
 
     # Ждем полной загрузки эмулятора
@@ -542,24 +601,29 @@ def launch_emulator(avd_name, existing_ids):
 
     return device_id, emulator_process
 
-def install_upload_things(device_id):
-    # Установка прокси
-    print('[*] Setting up proxy...')
-    subprocess.run([adb_path, "-s", device_id, "shell", "settings", "put", "global", "http_proxy", "192.168.0.50:8082"])
+def install_upload_things(device_id, only_clear_part: bool = False):
+    if not only_clear_part:
+        # Установка прокси
+        print('[*] Setting up proxy...')
+        subprocess.run([adb_path, "-s", device_id, "shell", "settings", "put", "global", "http_proxy", "192.168.0.50:8082"])
 
-    # Загрузка файлов
-    print('[*] Uploading files...')
-    subprocess.run([adb_path, "-s", device_id, "push", FRIDA_SERVER_PATH, "/data/local/tmp/frida-server"])
-    subprocess.run([adb_path, "-s", device_id, "push", MITM_CERT_PATH, "/data/local/tmp/cert-der.crt"])
+        # Загрузка файлов
+        print('[*] Uploading files...')
+        subprocess.run([adb_path, "-s", device_id, "push", FRIDA_SERVER_PATH, "/data/local/tmp/frida-server"])
+        subprocess.run([adb_path, "-s", device_id, "push", MITM_CERT_PATH, "/data/local/tmp/cert-der.crt"])
 
-    # Установка APK
-    print('[*] Installing APK...')
-    subprocess.run([adb_path, "-s", device_id, "install", APK_PATH])
+        # Установка APK
+        print('[*] Installing APK...')
+        subprocess.run([adb_path, "-s", device_id, "install", APK_PATH])
+        time.sleep(1)
 
     # Выдача разрешений
     package_name = "com.att.myWireless"
+    subprocess.run([adb_path, "-s", device_id, "shell", "pm", "clear", package_name])
+    print(f"[+] App data cleared for {package_name}")
+    time.sleep(1)
     subprocess.run(
-        ["adb", "-s", device_id, "shell", "pm", "grant", package_name, "android.permission.ACCESS_FINE_LOCATION"],
+        [adb_path, "-s", device_id, "shell", "pm", "grant", package_name, "android.permission.ACCESS_FINE_LOCATION"],
         check=True
     )
     print(f"[+] Granted ACCESS_FINE_LOCATION to {package_name}")
@@ -574,7 +638,7 @@ def root_device(device_id, avd_name):
 
     with change_directory("rootAVD"):
         magisk_result = subprocess.run(
-            [rootavd_path, ramdisk_path],
+            [rootavd_path, device_id, ramdisk_path],
             input="\n",
             text=True,
             stdout=subprocess.PIPE,
@@ -673,14 +737,14 @@ def root_last_part(device_id, avd_name, retry: int = 0):
         "su", "-c", "'chmod 755 /data/local/tmp/frida-server && /data/local/tmp/frida-server &'"
     ], stdout=subprocess.DEVNULL)
     controller = AndroidController(device_id)
-    time.sleep(1)
     retries = 0
     while True:
         if retries > 100:
             return cleanup_and_delete(None, frida_process, device_id, avd_name)
         result = check_magisk_root_screen(controller)
         if result:
-            subprocess.run([adb_path, "-s", device_id, "shell", "input", "tap", "727", "1505"])
+            x, y = rescale_cords(727, 1505, devices_cords['pixel_6'], devices_cords[current_device_name])
+            subprocess.run([adb_path, "-s", device_id, "shell", "input", "tap", str(x), str(y)])
             time.sleep(1)
             if not check_magisk_root_screen(controller):
                 break
@@ -697,13 +761,22 @@ def root_last_part(device_id, avd_name, retry: int = 0):
     print('[*] Starting forgot password flow...')
     try:
         result = forgot_password_flow(device_id)
-        if not result:
+        if result == 'clear_app_data':
+            subprocess.run([adb_path, "-s", device_id, "shell", "am", "force-stop", "com.att.myWireless"])
+            install_upload_things(device_id, True)
+            print('[*] Starting Frida script...')
+            frida_thread = threading.Thread(target=run_frida_script, args=[device_id], daemon=True)
+            frida_thread.start()
+            time.sleep(10)
+            result = forgot_password_flow(device_id)
+
+        if not result or result == 'clear_app_data':
             frida_thread.join(timeout=2)
             print('[*] Restarting Frida script...')
             frida_thread = threading.Thread(target=run_frida_script, args=[device_id], daemon=True)
             frida_thread.start()
             result = forgot_password_flow(device_id)
-            if result:
+            if result and result != 'clear_app_data':
                 print('[+] Successfully collected 2 headers (With app restart cuz error)')
         else:
             print('[+] Successfully collected 2 headers')
@@ -719,7 +792,8 @@ def cleanup_and_delete(frida_thread, frida_process, device_id, avd_name):
     if device_id:
         subprocess.run([adb_path, "-s", device_id, "emu", "kill"])
     else:
-        subprocess.run(['taskkill', '/F', '/IM', 'emulator*.exe'], shell=True)
+        # subprocess.run(['taskkill', '/F', '/IM', 'emulator*.exe'], shell=True)
+        ...
     time.sleep(1)
 
     print('[*] Deleting AVD...')
@@ -728,6 +802,7 @@ def cleanup_and_delete(frida_thread, frida_process, device_id, avd_name):
 
 if __name__ == "__main__":
     check_assets_files()
+    create_running_emulators()
 
     tries_to_do = int(input('How many retries need to do: ').strip())
     for x in range(0, tries_to_do):
